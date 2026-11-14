@@ -31,7 +31,7 @@ import (
 	"github.com/consensys/gnark/backend/solidity"
 	cs "github.com/consensys/gnark/constraint/bn254"
 
-	"zk-fhe-mpc-voting/zk/circuit"
+	"zk-voting/zk/circuit"
 )
 
 type contribution struct {

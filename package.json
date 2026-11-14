@@ -1,5 +1,5 @@
 {
-  "name": "zk-fhe-mpc-voting",
+  "name": "zk-voting",
   "description": "🗳️ Demo combining zkSNARK (gnark), FHE (Zama FHEVM) and MPC for anonymous, confidential on-chain voting.",
   "version": "0.4.1",
   "engines": {
@@ -7,10 +7,10 @@
     "npm": ">=7.0.0"
   },
   "license": "BSD-3-Clause-Clear",
-  "homepage": "https://github.com/ai-pavel/zk-fhe-mpc-voting#readme",
+  "homepage": "https://github.com/ai-pavel/zk-voting#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/ai-pavel/zk-fhe-mpc-voting.git"
+    "url": "git+https://github.com/ai-pavel/zk-voting.git"
   },
   "keywords": [
     "fhevm",

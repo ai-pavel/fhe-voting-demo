@@ -24,7 +24,7 @@ import (
 	"github.com/consensys/gnark/frontend"
 	"github.com/consensys/gnark/logger"
 
-	"zk-fhe-mpc-voting/zk/circuit"
+	"zk-voting/zk/circuit"
 )
 
 func main() {
