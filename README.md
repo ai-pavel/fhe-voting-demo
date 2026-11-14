@@ -1,4 +1,4 @@
-# zk-fhe-mpc-voting
+# 🗳️ zk-fhe-mpc-voting
 
 [Demo](#demo) · [How it works](#how-it-works) · [Technologies](#technologies) · [Threat model](#threat-model) ·
 [Limitations](#limitations) · [Quick start](#quick-start-mock-mode-no-real-fhe-needed) ·
