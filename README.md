@@ -10,30 +10,32 @@ privacy techniques that each solve one part of the problem:
 - **MPC**: the Groth16 keys come from a multi-party trusted-setup ceremony, and the FHE key is held as threshold shares
   by the Zama KMS.
 
-Built on [`fhevm-hardhat-template`](https://github.com/zama-ai/fhevm-hardhat-template).
-
 ## How it works
 
-```
-voter (off-chain)                         relayer     AnonymousConfidentialVote              Zama KMS (threshold)
-  secret s, registered commitment H(s)
-  1. ballot = Enc(yes/no)        (FHE)
-  2. proof  = "H(s) is in the voter tree,
-     nullifier = H(s, pollId),
-     bound to this ballot"   (zkSNARK)
-  ── ballot, proof, nullifier ──────────► │ vote() ──► │ nullifier unused?                      │
-                                          │            │ Groth16 verifyProof                    │
-                                          │            │ yes += b, no += !b (both change)       │
-                                                       │                                        │
-                                      after deadline:  │ requestTally()                         │
-                                                       │   makePubliclyDecryptable(yes, no) ───►│ decrypts ONLY the totals
-                                                       │ revealTally(clear, proof) ◄────────────┤ + signs the result
-                                                       │   checkSignatures(): forgeries revert  │
+```mermaid
+flowchart TD
+    subgraph setup["Setup (once)"]
+        CER["MPC ceremony<br/>alice → bob → carol + random beacon"] --> KEYS["Groth16 proving key<br/>+ Solidity Verifier"]
+        REG["Voters register commitments H(s)"] --> ROOT["Merkle root of the voter list"]
+    end
+
+    subgraph voter["Voter (off-chain)"]
+        ENC["Encrypt ballot Enc(yes / no)<br/>FHE"] --> PRV["Prove: H(s) is in the voter tree,<br/>nullifier = H(s, pollId), bound to this ballot<br/>zkSNARK"]
+    end
+
+    KEYS --> PRV
+    ROOT --> CHK
+    PRV -->|"ballot + proof + nullifier"| REL["Relayer<br/>sends the tx, learns nothing"]
+    REL -->|"vote()"| CHK{"AnonymousConfidentialVote<br/>nullifier unused?<br/>Groth16 proof valid?"}
+    CHK -->|no| REV["revert"]
+    CHK -->|yes| ADD["yes += b, no += !b<br/>both counters change, still encrypted"]
+    ADD -->|"after deadline: requestTally()"| KMS["Zama KMS, threshold MPC<br/>decrypts ONLY the totals and signs them"]
+    KMS -->|"revealTally(): signatures checked on-chain"| RES["Public result: yes = N, no = M"]
 ```
 
-Each technique answers a different question:
+## Technologies
 
-| Technique                        | Where                                   | What it hides or guarantees                                                     | Trust assumption                                                 |
+| Technology                       | Where                                   | What it hides or guarantees                                                     | Trust assumption                                                 |
 | -------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | **zkSNARK** (gnark, Groth16)     | `zk/circuit`, generated `Verifier`      | _Who_ voted: proves membership in the voter list without saying which entry     | None beyond the setup below; the proof itself reveals nothing    |
 | **FHE** (Zama FHEVM)             | `EncryptedTally`                        | _How_ each person voted: ballots are tallied encrypted, only totals decrypted   | Fewer than the threshold of KMS operators collude                |
@@ -43,21 +45,7 @@ Each technique answers a different question:
 Note the two different MPC trust models: the ceremony is safe if **1 of N** participants is honest, while the KMS is
 safe if **fewer than _t_** operators are dishonest.
 
-How each attack is stopped (all covered by `test/AnonymousConfidentialVote.ts`):
-
-| Attack                                            | Defence                                                                                                          |
-| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Unregistered voter                                | The proof must reach the contract's `voterRoot`                                                                  |
-| Voting twice                                      | `nullifier = MiMC(secret, pollId)` is the same every time and is stored as used                                  |
-| Voting twice with `nullifier + p`                 | The generated verifier rejects public inputs that are not reduced modulo the BN254 field                         |
-| Ballot stuffing (Enc(1000))                       | The ballot type is `ebool`, so its value can only be 0 or 1                                                      |
-| Front-runner copies the proof with its own ballot | The proof is bound to the ballot handle (`ballotHash`); the handle is bound to the sender by the FHE input proof |
-| Reusing a proof in another poll                   | `pollId` is the contract address and is a public input                                                           |
-| Relayer changes the vote                          | It cannot: the ballot is encrypted and the proof is bound to it                                                  |
-| Peeking at running totals                         | The totals are not decryptable by anyone until `requestTally()`, which only works after the deadline             |
-| Forged result                                     | `FHE.checkSignatures` verifies the KMS signatures on-chain                                                       |
-
-## The trusted-setup ceremony
+### The trusted-setup ceremony
 
 Groth16 needs secret randomness to build its keys, and whoever knows it can forge proofs. The ceremony splits it across
 participants: each one loads the previous state, mixes in fresh randomness and forgets it. Every contribution carries a
@@ -80,7 +68,23 @@ sealing phase 2 writes `zk/build/vote.pk`, `zk/build/vote.vk` and the Solidity v
 In this demo all participants run on one machine, so it shows the protocol, not the trust: a real ceremony has
 independent people contributing from their own machines.
 
-## Out of scope
+## Protections
+
+Each attack below is covered by `test/AnonymousConfidentialVote.ts`.
+
+| Attack                                            | Defence                                                                                                          |
+| ------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Unregistered voter                                | The proof must reach the contract's `voterRoot`                                                                  |
+| Voting twice                                      | `nullifier = MiMC(secret, pollId)` is the same every time and is stored as used                                  |
+| Voting twice with `nullifier + p`                 | The generated verifier rejects public inputs that are not reduced modulo the BN254 field                         |
+| Ballot stuffing (Enc(1000))                       | The ballot type is `ebool`, so its value can only be 0 or 1                                                      |
+| Front-runner copies the proof with its own ballot | The proof is bound to the ballot handle (`ballotHash`); the handle is bound to the sender by the FHE input proof |
+| Reusing a proof in another poll                   | `pollId` is the contract address and is a public input                                                           |
+| Relayer changes the vote                          | It cannot: the ballot is encrypted and the proof is bound to it                                                  |
+| Peeking at running totals                         | The totals are not decryptable by anyone until `requestTally()`, which only works after the deadline             |
+| Forged result                                     | `FHE.checkSignatures` verifies the KMS signatures on-chain                                                       |
+
+### Not covered
 
 - **Voter registration.** The demo generates every identity in one file (`zk/build/voters.json`). In reality each voter
   generates their own secret with `zkvote identity` and hands only the commitment to the registrar.
@@ -96,8 +100,9 @@ Requires Node 20+ and Go 1.26+.
 
 ```bash
 npm install
-npm test          # builds zkvote and runs the demo ceremony first if the keys are missing
-npm run zk:test   # Go tests for the circuit
+npm test           # contract tests; builds zkvote and runs the demo ceremony first if the keys are missing
+npm run zk:test    # Go tests for the circuit
+npm run test:e2e   # end to end on a local node: ceremony, deploy, votes via the CLI, tally (expects yes=2 no=1)
 ```
 
 ## Local CLI walkthrough
@@ -130,18 +135,6 @@ npx hardhat --network sepolia task:vote --support yes --voter 0
 # ...wait for the deadline...
 npx hardhat --network sepolia task:tally
 ```
-
-## Files
-
-- `contracts/AnonymousConfidentialVote.sol`: the vote: zk membership proof + FHE ballot, one ballot per nullifier
-- `contracts/EncryptedTally.sol`: the FHE part (encrypted counters, deadline, tally request and reveal)
-- `contracts/zk/VoteVerifier.sol`: Groth16 verifier generated by the ceremony (not committed)
-- `zk/circuit/`: the gnark circuit (Merkle membership, nullifier, ballot binding) and its Go tests
-- `zk/cmd/zkvote/`: CLI for the MPC ceremony, voter identities, the voter root and proving
-- `zk/client.ts`: TypeScript wrapper used by the tests, tasks and deploy script
-- `test/AnonymousConfidentialVote.ts`: mock-mode tests
-- `tasks/vote.ts`: CLI tasks `task:vote`, `task:status`, `task:tally`, `task:advance-time`
-- `deploy/deploy.ts`: deployment (`PROPOSAL`, `DURATION_SECONDS`, `VOTER_COUNT` env vars)
 
 ## License
 

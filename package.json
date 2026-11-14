@@ -1,6 +1,6 @@
 {
   "name": "zk-fhe-mpc-voting",
-  "description": "Demo combining zkSNARK (gnark), FHE (Zama FHEVM) and MPC for anonymous, confidential on-chain voting.",
+  "description": "🗳️ Demo combining zkSNARK (gnark), FHE (Zama FHEVM) and MPC for anonymous, confidential on-chain voting.",
   "version": "0.4.1",
   "engines": {
     "node": ">=20",
@@ -81,6 +81,7 @@
     "prettier:write": "prettier --write \"**/*.{js,json,md,sol,ts,yml}\"",
     "pretest": "npm run zk:ensure",
     "test": "hardhat test",
+    "test:e2e": "bash scripts/e2e.sh",
     "test:sepolia": "hardhat test --network sepolia",
     "build:ts": "tsc --project tsconfig.json",
     "typechain": "cross-env TS_NODE_TRANSPILE_ONLY=true hardhat typechain",
