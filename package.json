@@ -68,6 +68,7 @@
   ],
   "scripts": {
     "clean": "rimraf ./fhevmTemp ./artifacts ./cache ./coverage ./types ./coverage.json ./dist && npm run typechain",
+    "precompile": "npm run zk:ensure",
     "compile": "cross-env TS_NODE_TRANSPILE_ONLY=true hardhat compile",
     "coverage": "cross-env SOLIDITY_COVERAGE=true hardhat coverage --solcoverjs ./.solcover.js --temp artifacts --testfiles \"test/**/*.ts\" && npm run typechain",
     "lint": "npm run lint:sol && npm run lint:ts && npm run prettier:check",
@@ -76,6 +77,7 @@
     "postcompile": "npm run typechain",
     "prettier:check": "prettier --check \"**/*.{js,json,md,sol,ts,yml}\"",
     "prettier:write": "prettier --write \"**/*.{js,json,md,sol,ts,yml}\"",
+    "pretest": "npm run zk:ensure",
     "test": "hardhat test",
     "test:sepolia": "hardhat test --network sepolia",
     "build:ts": "tsc --project tsconfig.json",
@@ -83,7 +85,12 @@
     "chain": "hardhat node --network hardhat --no-deploy",
     "deploy:localhost": "hardhat deploy --network localhost",
     "deploy:sepolia": "hardhat deploy --network sepolia",
-    "verify:sepolia": "hardhat verify --network sepolia"
+    "verify:sepolia": "hardhat verify --network sepolia",
+    "zk:build": "cd zk && go build -o bin/zkvote ./cmd/zkvote",
+    "zk:ensure": "npm run zk:build && zk/bin/zkvote ceremony demo --if-missing",
+    "zk:setup": "npm run zk:build && zk/bin/zkvote ceremony demo",
+    "zk:verify": "zk/bin/zkvote ceremony verify",
+    "zk:test": "cd zk && go test ./..."
   },
   "overrides": {
     "ws@>=7.0.0 <7.5.10": ">=7.5.10",
