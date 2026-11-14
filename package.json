@@ -1,26 +1,28 @@
 {
-  "name": "fhe-voting-demo",
-  "description": "Confidential yes/no voting demo on Zama FHEVM",
+  "name": "zk-fhe-mpc-voting",
+  "description": "Demo combining zkSNARK (gnark), FHE (Zama FHEVM) and MPC for anonymous, confidential on-chain voting.",
   "version": "0.4.1",
   "engines": {
     "node": ">=20",
     "npm": ">=7.0.0"
   },
   "license": "BSD-3-Clause-Clear",
-  "homepage": "https://github.com/zama-ai/fhevm-hardhat-template/README.md",
+  "homepage": "https://github.com/ai-pavel/zk-fhe-mpc-voting#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/zama-ai/fhevm-hardhat-template.git"
+    "url": "git+https://github.com/ai-pavel/zk-fhe-mpc-voting.git"
   },
   "keywords": [
     "fhevm",
     "zama",
-    "eth",
+    "fhe",
+    "zksnark",
+    "gnark",
+    "groth16",
+    "mpc",
+    "trusted-setup",
+    "voting",
     "ethereum",
-    "dapps",
-    "wallet",
-    "web3",
-    "typescript",
     "hardhat"
   ],
   "dependencies": {

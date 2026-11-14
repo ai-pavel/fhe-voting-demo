@@ -5,9 +5,9 @@ import {FHE, ebool, euint32} from "@fhevm/solidity/lib/FHE.sol";
 import {ZamaEthereumConfig} from "@fhevm/solidity/config/ZamaConfig.sol";
 
 /// @title Encrypted yes/no tally
-/// @notice Shared FHE core of the voting contracts: ballots are added homomorphically to two encrypted counters,
-///         and only the final totals are ever decrypted (publicly, after the deadline, via the Zama KMS).
-/// @dev Subcontracts decide who may vote and call `_addBallot` with an already-validated `ebool`. Because the
+/// @notice FHE part of the vote: ballots are added homomorphically to two encrypted counters, and only the
+///         final totals are ever decrypted (publicly, after the deadline, via the Zama KMS).
+/// @dev The vote contract decides who may vote and calls `_addBallot` with an already-validated `ebool`. Because the
 ///      ballot type is `ebool`, a voter cannot stuff the box with Enc(1000): its value is guaranteed to be 0 or 1.
 abstract contract EncryptedTally is ZamaEthereumConfig {
     string public proposal;

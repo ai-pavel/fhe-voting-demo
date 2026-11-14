@@ -1,21 +1,32 @@
+import fs from "fs";
 import { DeployFunction } from "hardhat-deploy/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
+import { Identity, VOTERS_FILE, newIdentities, voterRoot } from "../zk/client";
 
 const PROPOSAL = process.env.PROPOSAL ?? "Adopt the new treasury policy?";
 const DURATION_SECONDS = Number(process.env.DURATION_SECONDS ?? 600);
+const VOTER_COUNT = Number(process.env.VOTER_COUNT ?? 5);
 
 const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
   const { deployer } = await hre.getNamedAccounts();
   const { deploy } = hre.deployments;
 
-  const deployed = await deploy("ConfidentialVote", {
+  if (!fs.existsSync(VOTERS_FILE)) {
+    fs.writeFileSync(VOTERS_FILE, JSON.stringify(newIdentities(VOTER_COUNT), null, 2));
+    console.log(`Created ${VOTER_COUNT} voter identities in ${VOTERS_FILE}`);
+  }
+  const voters: Identity[] = JSON.parse(fs.readFileSync(VOTERS_FILE, "utf8"));
+  const root = voterRoot(voters.map((v) => v.commitment));
+
+  const verifier = await deploy("Verifier", { from: deployer, log: true });
+  const deployed = await deploy("AnonymousConfidentialVote", {
     from: deployer,
-    args: [PROPOSAL, DURATION_SECONDS],
+    args: [PROPOSAL, DURATION_SECONDS, root, verifier.address],
     log: true,
   });
 
-  console.log(`ConfidentialVote contract: `, deployed.address);
+  console.log(`AnonymousConfidentialVote contract: `, deployed.address, `(voter root ${root})`);
 };
 export default func;
-func.id = "deploy_confidentialVote"; // id required to prevent reexecution
-func.tags = ["ConfidentialVote"];
+func.id = "deploy_anonymousConfidentialVote"; // id required to prevent reexecution
+func.tags = ["AnonymousConfidentialVote"];

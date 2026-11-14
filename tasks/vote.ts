@@ -1,8 +1,7 @@
 import fs from "fs";
 import { task } from "hardhat/config";
 import type { HardhatRuntimeEnvironment, TaskArguments } from "hardhat/types";
-import { VOTERS_FILE } from "../deploy/deployAnonymous";
-import { Identity, proveVote } from "../zk/client";
+import { Identity, VOTERS_FILE, proveVote } from "../zk/client";
 
 /**
  * Tutorial: Deploy and Interact Locally (--network localhost)
@@ -12,43 +11,34 @@ import { Identity, proveVote } from "../zk/client";
  *
  *   npx hardhat node
  *
- * 2. Deploy the ConfidentialVote contract (600s voting window by default)
+ * 2. Deploy the verifier and the vote (600s voting window by default). This also creates five voter
+ *    identities in zk/build/voters.json and registers their commitments as the voter root.
  *
  *   DURATION_SECONDS=60 npx hardhat --network localhost deploy
  *
- * 3. Vote from different accounts, then reveal the result after the deadline
+ * 3. Vote as different registered voters (all submitted by the relayer account), then reveal the result
  *
- *   npx hardhat --network localhost task:vote --support yes --voter 1
- *   npx hardhat --network localhost task:vote --support no  --voter 2
- *   npx hardhat --network localhost task:vote --support yes --voter 3
+ *   npx hardhat --network localhost task:vote --support yes --voter 0
+ *   npx hardhat --network localhost task:vote --support no  --voter 1
+ *   npx hardhat --network localhost task:vote --support yes --voter 2
  *   npx hardhat --network localhost task:status
  *   npx hardhat --network localhost task:advance-time --seconds 60   (localhost only)
  *   npx hardhat --network localhost task:tally
  *
  * The same tasks work with --network sepolia (skip task:advance-time; wait for the deadline instead).
- *
- * Anonymous variant (zkSNARK membership proof + FHE ballot), after `npm run zk:setup`:
- *
- *   npx hardhat --network localhost task:anon-vote --support yes --voter 0
- *   npx hardhat --network localhost task:anon-vote --support no  --voter 1
- *   npx hardhat --network localhost task:status --contract AnonymousConfidentialVote
- *   npx hardhat --network localhost task:advance-time --seconds 60
- *   npx hardhat --network localhost task:tally  --contract AnonymousConfidentialVote
  */
 
-async function getVote(hre: HardhatRuntimeEnvironment, address?: string, name = "ConfidentialVote") {
-  const deployment = address ? { address } : await hre.deployments.get(name);
-  console.log(`${name}: ${deployment.address}`);
-  // Both vote contracts share the EncryptedTally interface used by the status and tally tasks.
-  const contract = await hre.ethers.getContractAt("EncryptedTally", deployment.address);
+async function getVote(hre: HardhatRuntimeEnvironment, address?: string) {
+  const deployment = address ? { address } : await hre.deployments.get("AnonymousConfidentialVote");
+  console.log(`AnonymousConfidentialVote: ${deployment.address}`);
+  const contract = await hre.ethers.getContractAt("AnonymousConfidentialVote", deployment.address);
   return { contract, address: deployment.address };
 }
 
 task("task:status", "Prints the proposal, deadline and (once revealed) the result")
   .addOptionalParam("address", "Optionally specify the vote contract address")
-  .addOptionalParam("contract", "ConfidentialVote or AnonymousConfidentialVote", "ConfidentialVote")
   .setAction(async function (taskArguments: TaskArguments, hre) {
-    const { contract } = await getVote(hre, taskArguments.address, taskArguments.contract);
+    const { contract } = await getVote(hre, taskArguments.address);
 
     const deadline = Number(await contract.deadline());
     const now = (await hre.ethers.provider.getBlock("latest"))!.timestamp;
@@ -66,39 +56,8 @@ task("task:status", "Prints the proposal, deadline and (once revealed) the resul
     }
   });
 
-task("task:vote", "Casts an encrypted yes/no ballot")
-  .addOptionalParam("address", "Optionally specify the ConfidentialVote contract address")
-  .addParam("support", "yes or no")
-  .addOptionalParam("voter", "Signer index to vote from", "0")
-  .setAction(async function (taskArguments: TaskArguments, hre) {
-    const { ethers, fhevm } = hre;
-
-    const support = String(taskArguments.support).toLowerCase();
-    if (support !== "yes" && support !== "no") {
-      throw new Error(`Argument --support must be "yes" or "no"`);
-    }
-
-    await fhevm.initializeCLIApi();
-
-    const { address } = await getVote(hre, taskArguments.address);
-    const contract = await ethers.getContractAt("ConfidentialVote", address);
-    const voter = (await ethers.getSigners())[parseInt(taskArguments.voter)];
-
-    // Encrypted locally: the chain only ever sees the ciphertext handle and its input proof
-    const ballot = await fhevm
-      .createEncryptedInput(address, voter.address)
-      .addBool(support === "yes")
-      .encrypt();
-
-    const tx = await contract.connect(voter).vote(ballot.handles[0], ballot.inputProof);
-    console.log(`Wait for tx:${tx.hash}...`);
-    const receipt = await tx.wait();
-    console.log(`tx:${tx.hash} status=${receipt?.status}`);
-    console.log(`${voter.address} voted (ballot stays encrypted)`);
-  });
-
-task("task:anon-vote", "Casts an anonymous encrypted ballot through a relayer")
-  .addOptionalParam("address", "Optionally specify the AnonymousConfidentialVote contract address")
+task("task:vote", "Casts an anonymous encrypted ballot through a relayer")
+  .addOptionalParam("address", "Optionally specify the vote contract address")
   .addParam("support", "yes or no")
   .addOptionalParam("voter", "Index of the voter identity in zk/build/voters.json", "0")
   .addOptionalParam("relayer", "Signer index that submits the transaction", "0")
@@ -117,8 +76,7 @@ task("task:anon-vote", "Casts an anonymous encrypted ballot through a relayer")
 
     await fhevm.initializeCLIApi();
 
-    const { address } = await getVote(hre, taskArguments.address, "AnonymousConfidentialVote");
-    const contract = await ethers.getContractAt("AnonymousConfidentialVote", address);
+    const { contract, address } = await getVote(hre, taskArguments.address);
     const relayer = (await ethers.getSigners())[parseInt(taskArguments.relayer)];
 
     // The ballot is encrypted for the relayer (the tx sender), and the zk proof is bound to that ciphertext.
@@ -142,13 +100,12 @@ task("task:anon-vote", "Casts an anonymous encrypted ballot through a relayer")
 
 task("task:tally", "Requests public decryption of the totals and submits the KMS-signed result")
   .addOptionalParam("address", "Optionally specify the vote contract address")
-  .addOptionalParam("contract", "ConfidentialVote or AnonymousConfidentialVote", "ConfidentialVote")
   .setAction(async function (taskArguments: TaskArguments, hre) {
     const { fhevm } = hre;
 
     await fhevm.initializeCLIApi();
 
-    const { contract } = await getVote(hre, taskArguments.address, taskArguments.contract);
+    const { contract } = await getVote(hre, taskArguments.address);
 
     if (!(await contract.tallyRequested())) {
       const tx = await contract.requestTally();

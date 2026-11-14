@@ -7,6 +7,10 @@ import path from "path";
 const ROOT = path.resolve(__dirname, "..");
 const BIN = path.join(ROOT, "zk", "bin", "zkvote");
 
+// Demo shortcut: the deploy script generates every voter identity into one file. In reality each voter generates
+// their own secret (`zkvote identity`) and hands only the commitment to the registrar.
+export const VOTERS_FILE = path.join(ROOT, "zk", "build", "voters.json");
+
 function zkvote<T>(args: string[], input?: unknown): T {
   const out = execFileSync(BIN, args, {
     cwd: ROOT,

@@ -1,54 +1,34 @@
-# FHE Voting Demo
+# zk-fhe-mpc-voting
 
-A minimal confidential yes/no vote on [Zama FHEVM](https://docs.zama.ai/protocol). Ballots are encrypted on the client,
-tallied on-chain **under encryption**, and only the final totals are ever decrypted.
+A yes/no vote where nobody learns **how** anyone voted or **which** registered voter cast a ballot, built from three
+privacy techniques that each solve one part of the problem:
 
-It comes in two versions:
-
-- **`ConfidentialVote`**: FHE only. Nobody learns _how_ you voted, but your address shows _that_ you voted.
-- **`AnonymousConfidentialVote`**: zkSNARK + FHE + MPC. Nobody learns how you voted _or_ which registered voter you are.
-  See [Anonymous variant](#anonymous-variant-zksnark--fhe--mpc).
+- **zkSNARK** ([gnark](https://github.com/Consensys/gnark), Groth16): the voter proves they are on the voter list
+  without revealing which entry they are.
+- **FHE** ([Zama FHEVM](https://docs.zama.ai/protocol)): ballots are encrypted on the client and tallied on-chain
+  **under encryption**; only the final totals are ever decrypted.
+- **MPC**: the Groth16 keys come from a multi-party trusted-setup ceremony, and the FHE key is held as threshold shares
+  by the Zama KMS.
 
 Built on [`fhevm-hardhat-template`](https://github.com/zama-ai/fhevm-hardhat-template).
 
 ## How it works
 
 ```
-voter                      ConfidentialVote                         Zama KMS (threshold)
-  │ Enc(true/false) + proof   │                                         │
-  ├──────────────────────────►│ yes += asEuint32(b)                     │
-  │                           │ no  += asEuint32(!b)                    │
-  │                           │ (both counters change every vote)       │
-  │                           │                                         │
-  │          after deadline:  │ requestTally()                          │
-  │                           │   makePubliclyDecryptable(yes, no) ────►│ decrypts ONLY the totals
-  │                           │ revealTally(clear, proof) ◄─────────────┤ + signs the result
-  │                           │   checkSignatures() — forgeries revert  │
-```
-
-| Concern                     | How the demo handles it                                                                                                       |
-| --------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Ballot privacy              | Ballots are `ebool` ciphertexts. Nobody, including the contract owner, can decrypt an individual vote                         |
-| Ballot stuffing (Enc(1000)) | The ballot type is `ebool`, so its value can only be 0 or 1. The input proof binds the ciphertext to this contract and sender |
-| Double voting               | `hasVoted[msg.sender]`                                                                                                        |
-| Who holds the key           | The Zama KMS uses threshold MPC. Only handles explicitly marked publicly decryptable can be decrypted                         |
-| Forged result               | `FHE.checkSignatures` verifies the KMS signatures on-chain                                                                    |
-
-Out of scope for a demo: eligibility lists, coercion resistance or receipt-freeness, and hiding _who_ voted. Voter
-addresses are public; only their choices are hidden.
-
-## Anonymous variant: zkSNARK + FHE + MPC
-
-```
-voter (off-chain)                                  relayer            AnonymousConfidentialVote
+voter (off-chain)                         relayer     AnonymousConfidentialVote              Zama KMS (threshold)
   secret s, registered commitment H(s)
-  1. ballot = Enc(yes/no) for the relayer  (FHE)
-  2. proof  = "H(s) is in the voter tree,           │                    │
-              nullifier = H(s, pollId),             │                    │
-              bound to this ballot"   (zkSNARK)     │                    │
-  ──── ballot, proof, nullifier ──────────────────► │ vote(...) ───────► │ nullifier unused?
-                                                    │                    │ Groth16 verifyProof
-                                                    │                    │ yes += b, no += !b  (FHE)
+  1. ballot = Enc(yes/no)        (FHE)
+  2. proof  = "H(s) is in the voter tree,
+     nullifier = H(s, pollId),
+     bound to this ballot"   (zkSNARK)
+  ── ballot, proof, nullifier ──────────► │ vote() ──► │ nullifier unused?                      │
+                                          │            │ Groth16 verifyProof                    │
+                                          │            │ yes += b, no += !b (both change)       │
+                                                       │                                        │
+                                      after deadline:  │ requestTally()                         │
+                                                       │   makePubliclyDecryptable(yes, no) ───►│ decrypts ONLY the totals
+                                                       │ revealTally(clear, proof) ◄────────────┤ + signs the result
+                                                       │   checkSignatures(): forgeries revert  │
 ```
 
 Each technique answers a different question:
@@ -70,11 +50,14 @@ How each attack is stopped (all covered by `test/AnonymousConfidentialVote.ts`):
 | Unregistered voter                                | The proof must reach the contract's `voterRoot`                                                                  |
 | Voting twice                                      | `nullifier = MiMC(secret, pollId)` is the same every time and is stored as used                                  |
 | Voting twice with `nullifier + p`                 | The generated verifier rejects public inputs that are not reduced modulo the BN254 field                         |
+| Ballot stuffing (Enc(1000))                       | The ballot type is `ebool`, so its value can only be 0 or 1                                                      |
 | Front-runner copies the proof with its own ballot | The proof is bound to the ballot handle (`ballotHash`); the handle is bound to the sender by the FHE input proof |
 | Reusing a proof in another poll                   | `pollId` is the contract address and is a public input                                                           |
 | Relayer changes the vote                          | It cannot: the ballot is encrypted and the proof is bound to it                                                  |
+| Peeking at running totals                         | The totals are not decryptable by anyone until `requestTally()`, which only works after the deadline             |
+| Forged result                                     | `FHE.checkSignatures` verifies the KMS signatures on-chain                                                       |
 
-### The trusted-setup ceremony
+## The trusted-setup ceremony
 
 Groth16 needs secret randomness to build its keys, and whoever knows it can forge proofs. The ceremony splits it across
 participants: each one loads the previous state, mixes in fresh randomness and forgets it. Every contribution carries a
@@ -97,7 +80,7 @@ sealing phase 2 writes `zk/build/vote.pk`, `zk/build/vote.vk` and the Solidity v
 In this demo all participants run on one machine, so it shows the protocol, not the trust: a real ceremony has
 independent people contributing from their own machines.
 
-### Still out of scope
+## Out of scope
 
 - **Voter registration.** The demo generates every identity in one file (`zk/build/voters.json`). In reality each voter
   generates their own secret with `zkvote identity` and hands only the commitment to the registrar.
@@ -105,6 +88,7 @@ independent people contributing from their own machines.
   similar mixnet.
 - **Coercion and vote buying.** A voter can still prove how they voted by revealing their secret and encryption
   randomness.
+- **Small electorates.** If everyone votes the same way, or only one person votes, the totals reveal individual votes.
 
 ## Quick start (mock mode, no real FHE needed)
 
@@ -118,31 +102,22 @@ npm run zk:test   # Go tests for the circuit
 
 ## Local CLI walkthrough
 
+`deploy` creates five voter identities in `zk/build/voters.json` and registers their commitments as the voter root.
+Every ballot is submitted by the relayer account, so the chain never sees a voter's address.
+
 ```bash
 # terminal 1
 npx hardhat node
 
 # terminal 2
 DURATION_SECONDS=60 npx hardhat --network localhost deploy
-npx hardhat --network localhost task:vote --support yes --voter 1
-npx hardhat --network localhost task:vote --support no  --voter 2
-npx hardhat --network localhost task:vote --support yes --voter 3
+npx hardhat --network localhost task:vote --support yes --voter 0
+npx hardhat --network localhost task:vote --support no  --voter 1
+npx hardhat --network localhost task:vote --support yes --voter 2
+npx hardhat --network localhost task:vote --support no  --voter 2   # reverts: NullifierAlreadyUsed
 npx hardhat --network localhost task:status         # totals are opaque handles
 npx hardhat --network localhost task:advance-time --seconds 60
 npx hardhat --network localhost task:tally          # Result: yes=2 no=1
-```
-
-Anonymous variant, on the same node. `deploy` also creates five voter identities in `zk/build/voters.json`, and every
-ballot is submitted by the relayer account:
-
-```bash
-npx hardhat --network localhost task:anon-vote --support yes --voter 0
-npx hardhat --network localhost task:anon-vote --support no  --voter 1
-npx hardhat --network localhost task:anon-vote --support yes --voter 2
-npx hardhat --network localhost task:anon-vote --support no  --voter 2   # reverts: NullifierAlreadyUsed
-npx hardhat --network localhost task:status --contract AnonymousConfidentialVote
-npx hardhat --network localhost task:advance-time --seconds 60
-npx hardhat --network localhost task:tally  --contract AnonymousConfidentialVote   # Result: yes=2 no=1
 ```
 
 ## Sepolia (real FHE via the Zama coprocessor)
@@ -151,23 +126,22 @@ npx hardhat --network localhost task:tally  --contract AnonymousConfidentialVote
 npx hardhat vars set MNEMONIC
 npx hardhat vars set INFURA_API_KEY
 DURATION_SECONDS=600 npx hardhat --network sepolia deploy
-npx hardhat --network sepolia task:vote --support yes
+npx hardhat --network sepolia task:vote --support yes --voter 0
 # ...wait for the deadline...
 npx hardhat --network sepolia task:tally
 ```
 
 ## Files
 
-- `contracts/EncryptedTally.sol`: shared FHE core (encrypted counters, deadline, tally request and reveal)
-- `contracts/ConfidentialVote.sol`: FHE-only vote, one ballot per address
-- `contracts/AnonymousConfidentialVote.sol`: zk membership proof + FHE ballot, one ballot per nullifier
+- `contracts/AnonymousConfidentialVote.sol`: the vote: zk membership proof + FHE ballot, one ballot per nullifier
+- `contracts/EncryptedTally.sol`: the FHE part (encrypted counters, deadline, tally request and reveal)
 - `contracts/zk/VoteVerifier.sol`: Groth16 verifier generated by the ceremony (not committed)
 - `zk/circuit/`: the gnark circuit (Merkle membership, nullifier, ballot binding) and its Go tests
 - `zk/cmd/zkvote/`: CLI for the MPC ceremony, voter identities, the voter root and proving
 - `zk/client.ts`: TypeScript wrapper used by the tests, tasks and deploy script
-- `test/`: mock-mode tests for both contracts
-- `tasks/ConfidentialVote.ts`: CLI tasks `task:vote`, `task:anon-vote`, `task:status`, `task:tally`, `task:advance-time`
-- `deploy/`: deployment (`PROPOSAL`, `DURATION_SECONDS`, `VOTER_COUNT` env vars)
+- `test/AnonymousConfidentialVote.ts`: mock-mode tests
+- `tasks/vote.ts`: CLI tasks `task:vote`, `task:status`, `task:tally`, `task:advance-time`
+- `deploy/deploy.ts`: deployment (`PROPOSAL`, `DURATION_SECONDS`, `VOTER_COUNT` env vars)
 
 ## License
 

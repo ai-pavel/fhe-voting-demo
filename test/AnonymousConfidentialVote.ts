@@ -2,6 +2,7 @@ import { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
 import { time } from "@nomicfoundation/hardhat-network-helpers";
 import { ethers, fhevm } from "hardhat";
 import { expect } from "chai";
+import { FhevmType } from "@fhevm/hardhat-plugin";
 import { AnonymousConfidentialVote, Verifier } from "../types";
 import { Identity, newIdentities, proveVote, voterRoot } from "../zk/client";
 
@@ -141,5 +142,44 @@ describe("AnonymousConfidentialVote", function () {
     await expect(
       vote.connect(relayer).vote(zk.nullifier, ballot.handles[0], ballot.inputProof, zk.proof),
     ).to.be.revertedWithCustomError(vote, "VotingClosed");
+  });
+
+  it("keeps running totals undecryptable before the tally is requested", async function () {
+    await (await castVote(voters[0], true)).wait();
+    const [yesHandle] = await vote.getEncryptedTally();
+
+    // Not marked publicly decryptable, and no user was granted ACL access.
+    await expect(fhevm.publicDecryptEuint(FhevmType.euint32, yesHandle)).to.be.rejected;
+    await expect(fhevm.userDecryptEuint(FhevmType.euint32, yesHandle, address, relayer)).to.be.rejected;
+  });
+
+  it("rejects tally request while voting is open", async function () {
+    await expect(vote.requestTally()).to.be.revertedWithCustomError(vote, "VotingStillOpen");
+  });
+
+  it("rejects a forged tally", async function () {
+    await (await castVote(voters[0], true)).wait();
+    await time.increase(DURATION);
+    await (await vote.requestTally()).wait();
+
+    const [yesHandle, noHandle] = await vote.getEncryptedTally();
+    const decrypted = await fhevm.publicDecrypt([yesHandle, noHandle]);
+    const forged = ethers.AbiCoder.defaultAbiCoder().encode(["uint32", "uint32"], [0, 1]);
+
+    await expect(vote.revealTally(forged, decrypted.decryptionProof)).to.be.reverted;
+  });
+
+  it("rejects a ballot encrypted for a different sender than the relayer", async function () {
+    const [, , other] = await ethers.getSigners();
+    const ballot = await encryptBallot(true, other);
+    const zk = proveVote({
+      secret: voters[0].secret,
+      commitments,
+      pollId: await vote.pollId(),
+      ballotHash: await vote.ballotHash(ballot.handles[0]),
+    });
+    // The zk proof is valid, but the FHE input proof binds the ciphertext to `other`, not the relayer.
+    await expect(vote.connect(relayer).vote(zk.nullifier, ballot.handles[0], ballot.inputProof, zk.proof)).to.be
+      .reverted;
   });
 });
