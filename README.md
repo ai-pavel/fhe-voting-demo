@@ -1,8 +1,8 @@
 # zk-fhe-mpc-voting
 
-[Demo](#demo) · [How it works](#how-it-works) · [Technologies](#technologies) · [Protections](#protections) ·
-[Quick start](#quick-start-mock-mode-no-real-fhe-needed) · [Local CLI](#local-cli-walkthrough) ·
-[Sepolia](#sepolia-real-fhe-via-the-zama-coprocessor) · [License](#license)
+[Demo](#demo) · [How it works](#how-it-works) · [Technologies](#technologies) · [Threat model](#threat-model) ·
+[Limitations](#limitations) · [Quick start](#quick-start-mock-mode-no-real-fhe-needed) ·
+[Local CLI](#local-cli-walkthrough) · [Sepolia](#sepolia-real-fhe-via-the-zama-coprocessor) · [License](#license)
 
 A yes/no vote where nobody learns **how** anyone voted or **which** registered voter cast a ballot, built from three
 privacy techniques that each solve one part of the problem:
@@ -19,7 +19,6 @@ privacy techniques that each solve one part of the problem:
 `npm run test:e2e` end to end: MPC ceremony, deploy, 100 anonymous encrypted ballots, rejected double vote, tally.
 
 https://github.com/user-attachments/assets/e60b0d16-24ce-4da3-b1d5-ce9870358ef5
-
 
 ## How it works
 
@@ -83,7 +82,7 @@ The circuit's Merkle tree has depth 10, so a poll holds up to **1024 voters** (`
 number of ceremony participants is unlimited. Changing the depth changes the circuit, so its keys no longer fit;
 `npm run zk:ensure` (run by `npm test` and `test:e2e`) fingerprints the circuit and repeats the ceremony when needed.
 
-## Protections
+## Threat model
 
 Each attack below is covered by `test/AnonymousConfidentialVote.ts`.
 
@@ -99,7 +98,7 @@ Each attack below is covered by `test/AnonymousConfidentialVote.ts`.
 | Peeking at running totals                         | The totals are not decryptable by anyone until `requestTally()`, which only works after the deadline             |
 | Forged result                                     | `FHE.checkSignatures` verifies the KMS signatures on-chain                                                       |
 
-### Not covered
+## Limitations
 
 - **Voter registration.** The demo generates every identity in one file (`zk/build/voters.json`). In reality each voter
   generates their own secret with `zkvote identity` and hands only the commitment to the registrar.
@@ -108,11 +107,13 @@ Each attack below is covered by `test/AnonymousConfidentialVote.ts`.
 - **Coercion and vote buying.** A voter can still prove how they voted by revealing their secret and encryption
   randomness.
 - **Small electorates.** If everyone votes the same way, or only one person votes, the totals reveal individual votes.
-- **Quantum adversaries, partly.** Privacy holds: ballots are LWE-based FHE ciphertexts, and Groth16 proofs are
-  perfectly zero-knowledge over MiMC commitments, so data harvested today reveals neither votes nor voters later.
-  Integrity does not: Groth16 on BN254, the KMS signatures and Ethereum accounts all rely on elliptic curves, so a
-  quantum computer available _during_ a poll could forge membership proofs or the result. Replacing Groth16 with a
-  hash-based proof system (e.g. a STARK) would remove the trusted setup as well.
+- **Quantum adversaries, partly.**
+  - **Privacy holds.** Ballots are LWE-based FHE ciphertexts, and Groth16 proofs are perfectly zero-knowledge over MiMC
+    commitments, so data harvested today reveals neither votes nor voters later.
+  - **Integrity does not.** Groth16 on BN254, the KMS signatures and Ethereum accounts all rely on elliptic curves, so a
+    quantum computer available _during_ a poll could forge membership proofs or the result. A hash-based proof system
+    such as a STARK would make the membership proofs quantum-resistant and remove the trusted setup, but the KMS
+    signatures and Ethereum accounts would still need post-quantum replacements.
 
 ## Quick start (mock mode, no real FHE needed)
 
