@@ -1,5 +1,9 @@
 # zk-fhe-mpc-voting
 
+[Demo](#demo) · [How it works](#how-it-works) · [Technologies](#technologies) · [Protections](#protections) ·
+[Quick start](#quick-start-mock-mode-no-real-fhe-needed) · [Local CLI](#local-cli-walkthrough) ·
+[Sepolia](#sepolia-real-fhe-via-the-zama-coprocessor) · [License](#license)
+
 A yes/no vote where nobody learns **how** anyone voted or **which** registered voter cast a ballot, built from three
 privacy techniques that each solve one part of the problem:
 
@@ -9,6 +13,12 @@ privacy techniques that each solve one part of the problem:
   **under encryption**; only the final totals are ever decrypted.
 - **MPC**: the Groth16 keys come from a multi-party trusted-setup ceremony, and the FHE key is held as threshold shares
   by the Zama KMS.
+
+## Demo
+
+`npm run test:e2e` end to end: MPC ceremony, deploy, 100 anonymous encrypted ballots, rejected double vote, tally.
+
+[![End-to-end demo](https://asciinema.org/a/1272424.svg)](https://asciinema.org/a/1272424)
 
 ## How it works
 
@@ -68,6 +78,10 @@ sealing phase 2 writes `zk/build/vote.pk`, `zk/build/vote.vk` and the Solidity v
 In this demo all participants run on one machine, so it shows the protocol, not the trust: a real ceremony has
 independent people contributing from their own machines.
 
+The circuit's Merkle tree has depth 10, so a poll holds up to **1024 voters** (`Depth` in `zk/circuit/circuit.go`). The
+number of ceremony participants is unlimited. Changing the depth changes the circuit, so its keys no longer fit;
+`npm run zk:ensure` (run by `npm test` and `test:e2e`) fingerprints the circuit and repeats the ceremony when needed.
+
 ## Protections
 
 Each attack below is covered by `test/AnonymousConfidentialVote.ts`.
@@ -93,6 +107,11 @@ Each attack below is covered by `test/AnonymousConfidentialVote.ts`.
 - **Coercion and vote buying.** A voter can still prove how they voted by revealing their secret and encryption
   randomness.
 - **Small electorates.** If everyone votes the same way, or only one person votes, the totals reveal individual votes.
+- **Quantum adversaries, partly.** Privacy holds: ballots are LWE-based FHE ciphertexts, and Groth16 proofs are
+  perfectly zero-knowledge over MiMC commitments, so data harvested today reveals neither votes nor voters later.
+  Integrity does not: Groth16 on BN254, the KMS signatures and Ethereum accounts all rely on elliptic curves, so a
+  quantum computer available _during_ a poll could forge membership proofs or the result. Replacing Groth16 with a
+  hash-based proof system (e.g. a STARK) would remove the trusted setup as well.
 
 ## Quick start (mock mode, no real FHE needed)
 
@@ -102,13 +121,16 @@ Requires Node 20+ and Go 1.26+.
 npm install
 npm test           # contract tests; builds zkvote and runs the demo ceremony first if the keys are missing
 npm run zk:test    # Go tests for the circuit
-npm run test:e2e   # end to end on a local node: ceremony, deploy, votes via the CLI, tally (expects yes=2 no=1)
+npm run test:e2e   # end to end on a local node: fresh ceremony, deploy, 100 voters via the CLI, tally
+E2E_VOTERS=1024 npm run test:e2e   # the full voter-tree capacity
+npm run zk:clean                   # delete keys, ceremony transcript, verifier and the zkvote binary
 ```
 
 ## Local CLI walkthrough
 
-`deploy` creates five voter identities in `zk/build/voters.json` and registers their commitments as the voter root.
-Every ballot is submitted by the relayer account, so the chain never sees a voter's address.
+`deploy` creates five voter identities in `zk/build/voters.json` (`VOTER_COUNT` changes that) and registers their
+commitments as the voter root. Every ballot is submitted by the relayer account, so the chain never sees a voter's
+address.
 
 ```bash
 # terminal 1
@@ -120,6 +142,7 @@ npx hardhat --network localhost task:vote --support yes --voter 0
 npx hardhat --network localhost task:vote --support no  --voter 1
 npx hardhat --network localhost task:vote --support yes --voter 2
 npx hardhat --network localhost task:vote --support no  --voter 2   # reverts: NullifierAlreadyUsed
+npx hardhat --network localhost task:vote-batch --from 3            # the remaining voters in one go
 npx hardhat --network localhost task:status         # totals are opaque handles
 npx hardhat --network localhost task:advance-time --seconds 60
 npx hardhat --network localhost task:tally          # Result: yes=2 no=1

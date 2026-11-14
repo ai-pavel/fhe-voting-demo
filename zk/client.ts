@@ -8,8 +8,11 @@ const ROOT = path.resolve(__dirname, "..");
 const BIN = path.join(ROOT, "zk", "bin", "zkvote");
 
 // Demo shortcut: the deploy script generates every voter identity into one file. In reality each voter generates
-// their own secret (`zkvote identity`) and hands only the commitment to the registrar.
-export const VOTERS_FILE = path.join(ROOT, "zk", "build", "voters.json");
+// their own secret (`zkvote identity`) and hands only the commitment to the registrar. The e2e run points this at
+// its own file so it never touches the identities of a manual walkthrough.
+export const VOTERS_FILE = process.env.VOTERS_FILE
+  ? path.resolve(process.env.VOTERS_FILE)
+  : path.join(ROOT, "zk", "build", "voters.json");
 
 function zkvote<T>(args: string[], input?: unknown): T {
   const out = execFileSync(BIN, args, {

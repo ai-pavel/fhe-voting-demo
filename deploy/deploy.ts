@@ -1,4 +1,5 @@
 import fs from "fs";
+import path from "path";
 import { DeployFunction } from "hardhat-deploy/types";
 import { HardhatRuntimeEnvironment } from "hardhat/types";
 import { Identity, VOTERS_FILE, newIdentities, voterRoot } from "../zk/client";
@@ -13,7 +14,7 @@ const func: DeployFunction = async function (hre: HardhatRuntimeEnvironment) {
 
   if (!fs.existsSync(VOTERS_FILE)) {
     fs.writeFileSync(VOTERS_FILE, JSON.stringify(newIdentities(VOTER_COUNT), null, 2));
-    console.log(`Created ${VOTER_COUNT} voter identities in ${VOTERS_FILE}`);
+    console.log(`Created ${VOTER_COUNT} voter identities in ${path.relative(process.cwd(), VOTERS_FILE)}`);
   }
   const voters: Identity[] = JSON.parse(fs.readFileSync(VOTERS_FILE, "utf8"));
   const root = voterRoot(voters.map((v) => v.commitment));

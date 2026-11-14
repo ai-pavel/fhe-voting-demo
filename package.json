@@ -90,6 +90,7 @@
     "deploy:sepolia": "hardhat deploy --network sepolia",
     "verify:sepolia": "hardhat verify --network sepolia",
     "zk:build": "cd zk && go build -o bin/zkvote ./cmd/zkvote",
+    "zk:clean": "rimraf zk/build zk/bin contracts/zk",
     "zk:ensure": "npm run zk:build && zk/bin/zkvote ceremony demo --if-missing",
     "zk:setup": "npm run zk:build && zk/bin/zkvote ceremony demo",
     "zk:verify": "zk/bin/zkvote ceremony verify",

@@ -1,6 +1,8 @@
 import fs from "fs";
 import { task } from "hardhat/config";
 import type { HardhatRuntimeEnvironment, TaskArguments } from "hardhat/types";
+import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers";
+import type { AnonymousConfidentialVote } from "../types";
 import { Identity, VOTERS_FILE, proveVote } from "../zk/client";
 
 /**
@@ -56,46 +58,97 @@ task("task:status", "Prints the proposal, deadline and (once revealed) the resul
     }
   });
 
+function loadVoters(): Identity[] {
+  return JSON.parse(fs.readFileSync(VOTERS_FILE, "utf8"));
+}
+
+/** Encrypt one ballot for the relayer, prove membership bound to that ciphertext, and submit it. */
+async function castBallot(
+  hre: HardhatRuntimeEnvironment,
+  vote: AnonymousConfidentialVote,
+  address: string,
+  voters: Identity[],
+  voter: Identity,
+  yes: boolean,
+  relayer: HardhatEthersSigner,
+) {
+  const ballot = await hre.fhevm.createEncryptedInput(address, relayer.address).addBool(yes).encrypt();
+  const zk = proveVote({
+    secret: voter.secret,
+    commitments: voters.map((v) => v.commitment),
+    pollId: await vote.pollId(),
+    ballotHash: await vote.ballotHash(ballot.handles[0]),
+  });
+  const tx = await vote.connect(relayer).vote(zk.nullifier, ballot.handles[0], ballot.inputProof, zk.proof);
+  const receipt = await tx.wait();
+  return { tx, receipt, nullifier: zk.nullifier };
+}
+
 task("task:vote", "Casts an anonymous encrypted ballot through a relayer")
   .addOptionalParam("address", "Optionally specify the vote contract address")
   .addParam("support", "yes or no")
-  .addOptionalParam("voter", "Index of the voter identity in zk/build/voters.json", "0")
+  .addOptionalParam("voter", "Index of the voter identity in the voters file", "0")
   .addOptionalParam("relayer", "Signer index that submits the transaction", "0")
   .setAction(async function (taskArguments: TaskArguments, hre) {
-    const { ethers, fhevm } = hre;
-
     const support = String(taskArguments.support).toLowerCase();
     if (support !== "yes" && support !== "no") {
       throw new Error(`Argument --support must be "yes" or "no"`);
     }
-    const voters: Identity[] = JSON.parse(fs.readFileSync(VOTERS_FILE, "utf8"));
+    const voters = loadVoters();
     const voter = voters[parseInt(taskArguments.voter)];
     if (!voter) {
       throw new Error(`No voter #${taskArguments.voter} in ${VOTERS_FILE} (${voters.length} registered)`);
     }
 
-    await fhevm.initializeCLIApi();
+    await hre.fhevm.initializeCLIApi();
 
     const { contract, address } = await getVote(hre, taskArguments.address);
-    const relayer = (await ethers.getSigners())[parseInt(taskArguments.relayer)];
+    const relayer = (await hre.ethers.getSigners())[parseInt(taskArguments.relayer)];
 
-    // The ballot is encrypted for the relayer (the tx sender), and the zk proof is bound to that ciphertext.
-    const ballot = await fhevm
-      .createEncryptedInput(address, relayer.address)
-      .addBool(support === "yes")
-      .encrypt();
-    const zk = proveVote({
-      secret: voter.secret,
-      commitments: voters.map((v) => v.commitment),
-      pollId: await contract.pollId(),
-      ballotHash: await contract.ballotHash(ballot.handles[0]),
-    });
-
-    const tx = await contract.connect(relayer).vote(zk.nullifier, ballot.handles[0], ballot.inputProof, zk.proof);
-    console.log(`Wait for tx:${tx.hash}...`);
-    const receipt = await tx.wait();
+    const { tx, receipt, nullifier } = await castBallot(
+      hre,
+      contract,
+      address,
+      voters,
+      voter,
+      support === "yes",
+      relayer,
+    );
     console.log(`tx:${tx.hash} status=${receipt?.status}`);
-    console.log(`Relayer ${relayer.address} submitted an anonymous ballot (nullifier ${zk.nullifier})`);
+    console.log(`Relayer ${relayer.address} submitted an anonymous ballot (nullifier ${nullifier})`);
+  });
+
+task("task:vote-batch", "Casts ballots for a range of registered voters (voter i votes no if i % 3 == 2, else yes)")
+  .addOptionalParam("address", "Optionally specify the vote contract address")
+  .addOptionalParam("from", "First voter index", "0")
+  .addOptionalParam("count", "Number of voters (default: all remaining)")
+  .addOptionalParam("relayer", "Signer index that submits the transactions", "0")
+  .setAction(async function (taskArguments: TaskArguments, hre) {
+    const voters = loadVoters();
+    const from = parseInt(taskArguments.from);
+    const count = taskArguments.count === undefined ? voters.length - from : parseInt(taskArguments.count);
+    if (from < 0 || count < 1 || from + count > voters.length) {
+      throw new Error(
+        `Voters ${from}..${from + count - 1} are not all in ${VOTERS_FILE} (${voters.length} registered)`,
+      );
+    }
+
+    await hre.fhevm.initializeCLIApi();
+
+    const { contract, address } = await getVote(hre, taskArguments.address);
+    const relayer = (await hre.ethers.getSigners())[parseInt(taskArguments.relayer)];
+
+    let yes = 0;
+    const started = Date.now();
+    for (let i = from; i < from + count; i++) {
+      const support = i % 3 !== 2;
+      await castBallot(hre, contract, address, voters, voters[i], support, relayer);
+      if (support) yes++;
+      if ((i - from + 1) % 10 === 0 || i === from + count - 1) {
+        console.log(`  ${i - from + 1}/${count} ballots cast (${((Date.now() - started) / 1000).toFixed(1)}s)`);
+      }
+    }
+    console.log(`Expected: yes=${yes} no=${count - yes}`);
   });
 
 task("task:tally", "Requests public decryption of the totals and submits the KMS-signed result")

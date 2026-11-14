@@ -31,7 +31,7 @@ import (
 	"github.com/consensys/gnark/backend/solidity"
 	cs "github.com/consensys/gnark/constraint/bn254"
 
-	"fhe-voting-demo/zk/circuit"
+	"zk-fhe-mpc-voting/zk/circuit"
 )
 
 type contribution struct {
@@ -41,6 +41,7 @@ type contribution struct {
 }
 
 type transcript struct {
+	Circuit    string         `json:"circuitSha256"` // fingerprint of the R1CS the keys are for
 	DomainSize uint64         `json:"domainSize"`
 	Phase1     []contribution `json:"phase1"`
 	Beacon1    string         `json:"beacon1,omitempty"`
@@ -63,7 +64,7 @@ func runCeremony(args []string) error {
 	phase := fs.Int("phase", 0, "1 or 2 (contribute, seal)")
 	beacon := fs.String("beacon", "", "public random beacon value (seal)")
 	participants := fs.String("participants", "alice,bob,carol", "comma-separated contributors (demo)")
-	ifMissing := fs.Bool("if-missing", false, "skip the demo if keys already exist (demo)")
+	ifMissing := fs.Bool("if-missing", false, "skip the demo if keys for the current circuit already exist (demo)")
 	if len(args) == 0 {
 		return errors.New("usage: zkvote ceremony <init|contribute|seal|verify|demo> [flags]")
 	}
@@ -83,9 +84,15 @@ func runCeremony(args []string) error {
 	case "verify":
 		return c.verify()
 	case "demo":
-		if *ifMissing && fileExists(filepath.Join(*out, "vote.pk")) && fileExists(*sol) {
-			fmt.Println("keys already exist, skipping ceremony")
-			return nil
+		if *ifMissing {
+			upToDate, err := c.upToDate()
+			if err != nil {
+				return err
+			}
+			if upToDate {
+				fmt.Println("keys for the current circuit already exist, skipping ceremony")
+				return nil
+			}
 		}
 		return c.demo(strings.Split(*participants, ","))
 	}
@@ -128,7 +135,11 @@ func (c ceremony) init() error {
 	if _, err := writeObject(filepath.Join(c.dir, "phase1-0000-init.bin"), mpcsetup.NewPhase1(domain)); err != nil {
 		return err
 	}
-	return c.saveTranscript(&transcript{DomainSize: domain})
+	fingerprint, err := circuitFingerprint(r1cs)
+	if err != nil {
+		return err
+	}
+	return c.saveTranscript(&transcript{Circuit: fingerprint, DomainSize: domain})
 }
 
 func (c ceremony) contribute(phase int, name string) error {
@@ -350,6 +361,39 @@ func (c ceremony) saveTranscript(t *transcript) error {
 		return err
 	}
 	return os.WriteFile(filepath.Join(c.dir, "transcript.json"), append(data, '\n'), 0o644)
+}
+
+// upToDate reports whether a finished ceremony exists for the circuit as it is compiled now. Keys from a
+// ceremony for an older circuit (e.g. a different tree depth) would silently produce proofs that never verify.
+func (c ceremony) upToDate() (bool, error) {
+	if !fileExists(filepath.Join(c.out, "vote.pk")) || !fileExists(c.sol) {
+		return false, nil
+	}
+	t, err := c.loadTranscript()
+	if err != nil || t.Beacon2 == "" {
+		return false, nil
+	}
+	r1cs, err := compileR1CS()
+	if err != nil {
+		return false, err
+	}
+	fingerprint, err := circuitFingerprint(r1cs)
+	if err != nil {
+		return false, err
+	}
+	if t.Circuit != fingerprint {
+		fmt.Println("circuit changed since the last ceremony, running it again")
+		return false, nil
+	}
+	return true, nil
+}
+
+func circuitFingerprint(r1cs *cs.R1CS) (string, error) {
+	h := sha256.New()
+	if _, err := r1cs.WriteTo(h); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func compileR1CS() (*cs.R1CS, error) {

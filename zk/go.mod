@@ -1,4 +1,4 @@
-module fhe-voting-demo/zk
+module zk-fhe-mpc-voting/zk
 
 go 1.26.8
 

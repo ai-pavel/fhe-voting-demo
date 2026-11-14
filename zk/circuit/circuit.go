@@ -21,8 +21,9 @@ import (
 	"github.com/consensys/gnark/std/hash/mimc"
 )
 
-// Depth of the voter Merkle tree: up to 2^Depth registered voters.
-const Depth = 4
+// Depth of the voter Merkle tree: up to 2^Depth registered voters. Changing it changes the circuit, so the
+// trusted-setup ceremony has to be run again (`npm run zk:ensure` detects that and re-runs it).
+const Depth = 10
 
 // MaxVoters is the capacity of the voter tree.
 const MaxVoters = 1 << Depth
