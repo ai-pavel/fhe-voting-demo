@@ -18,7 +18,7 @@ privacy techniques that each solve one part of the problem:
 
 `npm run test:e2e` end to end: MPC ceremony, deploy, 100 anonymous encrypted ballots, rejected double vote, tally.
 
-[![End-to-end demo](https://asciinema.org/a/1272424.svg)](https://asciinema.org/a/1272424)
+[![asciicast](https://asciinema.org/a/xbIwnA7cZC4e4wYF.svg)](https://asciinema.org/a/xbIwnA7cZC4e4wYF)
 
 ## How it works
 
