@@ -38,9 +38,9 @@ flowchart TD
 | Technology                       | Where                                   | What it hides or guarantees                                                     | Trust assumption                                                 |
 | -------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
 | **MPC #1**: trusted setup        | `zkvote ceremony` (gnark `mpcsetup`)    | Nobody holds the Groth16 "toxic waste", which would let them forge voter proofs | **At least one** ceremony participant discarded their randomness |
+| **MPC #2**: threshold decryption | Zama KMS (part of FHEVM, not this repo) | Nobody holds the FHE private key                                                | Fewer than _t_ of _n_ KMS operators collude                      |
 | **zkSNARK** (gnark, Groth16)     | `zk/circuit`, generated `Verifier`      | _Who_ voted: proves membership in the voter list without saying which entry     | None beyond MPC #1; the proof itself reveals nothing             |
 | **FHE** (Zama FHEVM)             | `EncryptedTally`                        | _How_ each person voted: ballots are tallied encrypted, only totals decrypted   | Fewer than the threshold of KMS operators collude                |
-| **MPC #2**: threshold decryption | Zama KMS (part of FHEVM, not this repo) | Nobody holds the FHE private key                                                | Fewer than _t_ of _n_ KMS operators collude                      |
 
 Note the two different MPC trust models: the ceremony is safe if **1 of N** participants is honest, while the KMS is
 safe if **fewer than _t_** operators are dishonest.
