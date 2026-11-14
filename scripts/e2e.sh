@@ -10,7 +10,10 @@ cd "$(dirname "$0")/.."
 
 RPC=http://127.0.0.1:8545
 LOG=zk/build/e2e-node.log
-export DURATION_SECONDS=600
+# The node automines one block per tx and every block's timestamp is at least the previous one + 1s,
+# so chain time runs ahead of the wall clock (~1s per ballot). Leave plenty of room: the window is
+# skipped with task:advance-time anyway.
+export DURATION_SECONDS=86400
 # Fresh identities in a file of its own, so a manual walkthrough's zk/build/voters.json is left alone.
 export VOTER_COUNT=${E2E_VOTERS:-100}
 export VOTERS_FILE=zk/build/e2e-voters.json
